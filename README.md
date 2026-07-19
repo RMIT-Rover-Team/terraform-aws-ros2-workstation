@@ -450,12 +450,6 @@ source of truth is **Cost Explorer**:
 - Filter **Usage Type: `EBS:SnapshotUsage`**
 - Reports actual GB-month billed, based on used blocks only
 
-**Rough cost:** standard EBS snapshot pricing is **$0.05/GB-month** in
-US East, slightly higher elsewhere (ap-southeast-2 ≈ **$0.055/GB-
-month**). At ~25GB used: **~$1.35-1.50/month** — trivial next to the
-`g4dn.xlarge` compute cost, but it bills continuously for as long as
-the AMI exists, running or not, so clean up old AMIs you're not using
-
 ## Useful commands
 
 ```bash
