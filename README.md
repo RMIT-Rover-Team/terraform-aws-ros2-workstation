@@ -249,20 +249,6 @@ recreate the instance under the new pricing model since
 
 ---
 
-## Things to check/update before applying
-
-- [ ] `allowed_cidr` in `terraform.tfvars` — defaults to `0.0.0.0/0`
-      (open to the internet on ports 22 and 8443). Narrow to your own
-      IP (`x.x.x.x/32`) if this will be up for more than a quick test.
-- [ ] Confirm the AMI (`ami_id`) still exists in your target region —
-      AMI IDs can be deprecated/replaced over time.
-- [ ] `g4dn.xlarge`/`g5.xlarge`/`g6.xlarge` are paid GPU instances — remember to
-      `terraform destroy` (or at least stop the instance) when not in
-      use. Provisioning alone takes ~10–15 minutes before ROS2 is fully
-      installed.
-
----
-
 ## Useful commands
 
 ```bash
