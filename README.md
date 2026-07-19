@@ -183,7 +183,7 @@ still mid-provisioning at that point.
  
 **Don't try connecting via DCV right after `apply` returns** — the
 `dcvserver` isn't running yet, so the connection will just fail. Wait
-~15-25 minutes, then try the app. If it's not up yet, wait a bit
+~10-15 minutes, then try the app. If it's not up yet, wait a bit
 longer and retry — there's no harm in retrying, the connection simply
 refuses until Phase 2 finishes and `dcvserver` starts.
  
@@ -204,7 +204,7 @@ just billed as spot.
  
 **Tradeoff to know before enabling:** AWS can interrupt a spot
 instance with as little as ~2 minutes' notice if it reclaims capacity
-or the price rises above your bid. Given this box takes ~20 minutes to
+or the price rises above your bid. Given this box takes ~10 minutes to
 provision and is used as an interactive desktop (DCV session), an
 interruption mid-work is more disruptive here than for a typical
 background/batch job.
