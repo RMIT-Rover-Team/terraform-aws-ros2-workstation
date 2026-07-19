@@ -1,0 +1,150 @@
+#!/bin/bash
+# This script is installed to /usr/local/bin/provision.sh and is invoked:
+#   1) once directly by cloud-init on first boot
+#   2) on every subsequent boot by the provision.service systemd unit
+# It tracks progress in $PHASE_FILE so it resumes correctly after "sudo reboot".
+
+set -x
+exec >> /var/log/provision.log 2>&1
+
+PHASE_FILE=/var/lib/provision-phase
+mkdir -p /var/lib
+
+if [ ! -f "$PHASE_FILE" ]; then
+  echo 1 > "$PHASE_FILE"
+fi
+
+PHASE=$(cat "$PHASE_FILE")
+
+case "$PHASE" in
+
+1)
+  echo "=== Running phase 1 ==="
+
+  apt update -y && apt upgrade -y
+  apt install -y ubuntu-desktop gdm3 mesa-utils
+  sed -i s/'#WaylandEnable=false'/'WaylandEnable=false'/g /etc/gdm3/custom.conf
+  systemctl restart gdm3
+  nvidia-xconfig --preserve-busid --enable-all-gpus
+
+  mkdir -p /root/dcv-install && cd /root/dcv-install
+  wget https://d1uj6qtbmh3dt5.cloudfront.net/NICE-GPG-KEY
+  gpg --import NICE-GPG-KEY
+  wget https://d1uj6qtbmh3dt5.cloudfront.net/2025.0/Servers/nice-dcv-2025.0-20103-ubuntu2404-x86_64.tgz
+  tar -xvzf nice-dcv-2025.0-20103-ubuntu2404-x86_64.tgz
+  cd nice-dcv-2025.0-20103-ubuntu2404-x86_64
+  apt install -y ./nice-dcv-server_2025.0.20103-1_amd64.ubuntu2404.deb
+  apt-get install -f -y
+  usermod -aG video ubuntu
+
+  # advance phase marker BEFORE reboot so phase 2 runs next boot
+  echo 2 > "$PHASE_FILE"
+
+  systemctl isolate multi-user.target
+  systemctl isolate graphical.target
+
+  echo "=== Phase 1 complete, rebooting ==="
+  reboot
+  ;;
+
+2)
+  echo "=== Running phase 2 ==="
+
+  sed -i s/"#create-session = true"/"create-session = true"/g /etc/dcv/dcv.conf
+  sed -i s/'#owner = ""'/'owner = "ubuntu"'/g /etc/dcv/dcv.conf
+
+  cat <<'DCVCONF' >> /etc/dcv/dcv.conf
+
+[clipboard]
+primary-selection-paste=true
+primary-selection-copy=true
+DCVCONF
+
+  systemctl enable dcvserver
+  systemctl start dcvserver
+  echo 'ubuntu:ubuntu' | chpasswd
+
+  apt update -y && apt install -y locales
+  locale-gen en_US en_US.UTF-8
+  update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+  export LANG=en_US.UTF-8
+
+  apt install -y software-properties-common
+  add-apt-repository -y universe
+  apt update -y && apt install -y curl
+
+  export ROS_APT_SOURCE_VERSION=$(curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F "tag_name" | awk -F'"' '{print $4}')
+
+  curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-apt-source/releases/download/$${ROS_APT_SOURCE_VERSION}/ros2-apt-source_$${ROS_APT_SOURCE_VERSION}.$(. /etc/os-release && echo $${UBUNTU_CODENAME:-$${VERSION_CODENAME}})_all.deb"
+
+  dpkg -i /tmp/ros2-apt-source.deb
+  apt-get install -f -y
+  apt clean && apt update -y && apt full-upgrade -y
+  apt install -y ros-dev-tools
+  apt update -y && apt upgrade -y
+  apt install -y ros-jazzy-desktop
+  source /opt/ros/jazzy/setup.bash
+  rosdep init
+  su - ubuntu -c "rosdep update"
+
+  apt update -y && apt upgrade -y
+  apt install -y python3-colcon-common-extensions
+  apt install -y build-essential dkms "linux-headers-$(uname -r)"
+  apt install -y git
+
+  export ROS_DISTRO=jazzy
+  apt-get update -y && apt-get upgrade -y && apt-get install -y \
+    ros-$${ROS_DISTRO}-ros-gz ros-$${ROS_DISTRO}-gz-ros2-control \
+    ros-$${ROS_DISTRO}-gz-ros2-control-demos ros-$${ROS_DISTRO}-joint-state-publisher-gui \
+    ros-$${ROS_DISTRO}-moveit ros-$${ROS_DISTRO}-xacro ros-$${ROS_DISTRO}-ros2-control \
+    ros-$${ROS_DISTRO}-ros2-controllers ros-$${ROS_DISTRO}-urdf-tutorial \
+    "ros-$${ROS_DISTRO}-turtlebot*" ros-$${ROS_DISTRO}-navigation2 ros-$${ROS_DISTRO}-nav2-bringup \
+    "ros-$${ROS_DISTRO}-nav2-minimal-tb*" libserial-dev python3 python3-pip terminator \
+    linux-headers-generic build-essential gdb gedit
+
+  snap install --classic code
+
+  mkdir -p /home/ubuntu/ros2_ws/src
+
+  {
+    echo "source /opt/ros/jazzy/setup.bash"
+    echo "export ROS_DOMAIN_ID=42"
+    echo "export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST"
+    echo "source /usr/share/colcon_cd/function/colcon_cd.sh"
+    echo "source /usr/share/colcon_argcomplete/hook/colcon-argcomplete.bash"
+    echo "source /usr/share/colcon_cd/function/colcon_cd-argcomplete.bash"
+    echo 'alias build="cd /home/ubuntu/ros2_ws/ && rosdep update && sudo rosdep install -i --from-path src --rosdistro jazzy -y && colcon build && source /home/ubuntu/.bashrc"'
+    echo 'bind '\''"\C-xz": alias-expand-line'\'''
+    echo '[ -f /home/ubuntu/ros2_ws/install/setup.bash ] && source /home/ubuntu/ros2_ws/install/setup.bash'
+  } >> /home/ubuntu/.bashrc
+
+  chown -R ubuntu:ubuntu /home/ubuntu/ros2_ws /home/ubuntu/.bashrc
+
+  # --- Generate a dedicated SSH key for this instance (GitHub deploy key) ---
+  su - ubuntu -c "mkdir -p ~/.ssh && chmod 700 ~/.ssh"
+  su - ubuntu -c "ssh-keygen -t ed25519 -N '' -C 'ros2-robotics-ec2' -f ~/.ssh/id_ed25519"
+  su - ubuntu -c "ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null"
+  cp /home/ubuntu/.ssh/id_ed25519.pub /home/ubuntu/github_deploy_key.pub
+  chown ubuntu:ubuntu /home/ubuntu/github_deploy_key.pub
+
+  echo "===================================================================="
+  echo "GITHUB DEPLOY KEY — add this as a Deploy Key on your repo:"
+  echo "===================================================================="
+  cat /home/ubuntu/.ssh/id_ed25519.pub
+  echo "===================================================================="
+  echo "(Also saved to /home/ubuntu/github_deploy_key.pub for easy viewing)"
+  echo "===================================================================="
+
+  echo done > "$PHASE_FILE"
+
+  # Stop this service from ever running again on future boots/restarts
+  systemctl disable provision.service
+
+  echo "=== Phase 2 complete. Provisioning finished. ==="
+  ;;
+
+done)
+  echo "=== Provisioning already complete, nothing to do ==="
+  ;;
+
+esac

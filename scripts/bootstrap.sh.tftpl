@@ -1,0 +1,33 @@
+#!/bin/bash
+# Runs once via cloud-init on first boot.
+# Installs the provisioning script + a systemd service that re-runs it on every
+# boot (so it can resume after the mid-provisioning reboot), then runs phase 1.
+
+set -e
+
+cat <<'PROVISION_SCRIPT' > /usr/local/bin/provision.sh
+${provision_script}
+PROVISION_SCRIPT
+
+chmod +x /usr/local/bin/provision.sh
+
+cat <<'UNIT' > /etc/systemd/system/provision.service
+[Unit]
+Description=Resume instance provisioning after reboot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/provision.sh
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable provision.service
+
+# Kick off phase 1 immediately instead of waiting for next boot
+/usr/local/bin/provision.sh
