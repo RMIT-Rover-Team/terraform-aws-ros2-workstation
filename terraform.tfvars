@@ -1,6 +1,5 @@
 aws_region       = "ap-southeast-2"
-# ami_id           = "ami-0319dc78bfd3b0412"
-ami_id           = "ami-09f8c73caaf176d07"
+ami_id           = "ami-0319dc78bfd3b0412"
 instance_type    = "g4dn.xlarge"
 instance_name    = "ROS2_Robotics"
 root_volume_size = 120
