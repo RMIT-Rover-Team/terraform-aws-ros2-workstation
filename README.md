@@ -86,9 +86,6 @@ terraform.tfstate.backup        # previous state, auto-saved
    >   an IAM user with a scoped policy (e.g. `AmazonEC2FullAccess`)
    >   instead.
 
-5. *(Optional)* VS Code + HashiCorp Terraform extension for syntax
-   highlighting, `terraform fmt`, and inline validation.
-
 ---
 
 ## Day-to-day workflow
@@ -107,39 +104,36 @@ steps 2–3. Terraform diffs against state and only touches what changed.
 **State file (`terraform.tfstate`):** this is Terraform's memory of what
 it created. Keep it — losing it means Terraform "forgets" the resources
 exist (they'll keep running in AWS, but you'd have to `terraform import`
-them back in to manage them again). Solo/local state is fine for this
-project; no remote backend needed.
+them back in to manage them again). 
 
 ---
 
-## How the reboot is handled
+## Accessing the instance - Connecting via NICE DCV
+ 
+Get the instance's current public IP first:
+```bash
+terraform output public_ip
+```
+ 
+> **Note:** the public IP changes on every stop/start (or
+> destroy/apply) cycle since this setup uses the default auto-assigned
+> IP, not an Elastic IP. Re-check the output each time before
+> connecting — don't bookmark a fixed address.
+ 
+**Login:** `ubuntu` / `ubuntu` (set by the
+provisioning script — change this if the instance is ever exposed
+long-term).
+ 
+### DCV Viewer app
+ 
+Download from [amazondcv.com](https://www.amazondcv.com/).
+ 
+1. Open the app.
+2. Enter `<public_ip>`.
+3. Accept the same self-signed certificate trust prompt on first
+   connect — the app remembers it after that.
+4. Log in as `ubuntu`.
 
-The install has a mid-script `reboot` (to load the NVIDIA config /
-desktop environment). Since `user_data` normally only runs once on
-first boot, `bootstrap.sh.tftpl` sets up a **systemd service**
-(`provision.service`) that re-runs `provision.sh` on every boot.
-`provision.sh` tracks its progress in `/var/lib/provision-phase`:
-
-- **Phase 1** — desktop environment, NVIDIA config, DCV server install →
-  writes `2` to the phase file → reboots.
-- **Phase 2** (runs automatically after reboot via systemd) — DCV
-  config, ROS2 Jazzy install, workspace setup → writes `done` → disables
-  `provision.service` so it never runs again on future stop/starts.
-
-Progress and errors are logged to `/var/log/provision.log` on the
-instance.
-
----
-
-## Accessing the instance
-
-- **NICE DCV (remote desktop):** `https://<public_ip>:8443`
-  Login: `ubuntu` / `ubuntu` (set by the provisioning script — change
-  this if the instance will be reachable long-term).
-- **SSH (port 22):** open in the security group, but no key pair is
-  attached and password SSH auth isn't enabled by default. Use DCV, or
-  add a key pair / enable password auth / attach an SSM role if you
-  need SSH or CLI access.
 
 ---
 
@@ -185,71 +179,16 @@ isn't destroyed).
 only. It says nothing about what's happening inside the OS, which is
 still mid-provisioning at that point.
  
-**Actual readiness takes ~15-25+ minutes**, broken down roughly as:
- 
-| Stage | Rough time |
-|---|---|
-| Instance boots, cloud-init starts | ~1-2 min |
-| Phase 1: `apt update/upgrade`, desktop install, NVIDIA config, DCV install | ~5-10 min |
-| **Reboot** (Phase 1 → Phase 2 handoff) | ~1-2 min |
-| Phase 2: DCV config, full ROS2 Jazzy + package set install, workspace setup, SSH key gen | ~10-15 min |
+**Actual readiness takes ~10-15 minutes**.
  
 **Don't try connecting via DCV right after `apply` returns** — the
 `dcvserver` isn't running yet, so the connection will just fail. Wait
-~15-25 minutes, then try the URL/app. If it's not up yet, wait a bit
+~15-25 minutes, then try the app. If it's not up yet, wait a bit
 longer and retry — there's no harm in retrying, the connection simply
 refuses until Phase 2 finishes and `dcvserver` starts.
  
-There's no SSH/SSM access configured to poll `/var/log/provision.log`
-remotely for exact status — for a solo dev box, "wait ~20 min, then
-try connecting, retry if needed" is the simplest approach.
-
-
 ---
- 
-## Connecting via NICE DCV
- 
-Get the instance's current public IP first:
-```bash
-terraform output public_ip
-# or
-terraform output dcv_url
-```
- 
-> **Note:** the public IP changes on every stop/start (or
-> destroy/apply) cycle since this setup uses the default auto-assigned
-> IP, not an Elastic IP. Re-check the output each time before
-> connecting — don't bookmark a fixed address.
- 
-**Login for both methods:** `ubuntu` / `ubuntu` (set by the
-provisioning script — change this if the instance is ever exposed
-long-term).
- 
-### Option A — Browser
- 
-1. Go to `https://<public_ip>:8443`
-2. You'll hit a **certificate warning** — this is expected. DCV ships
-   with a self-signed cert by default. Click **Advanced → Proceed
-   anyway** (or your browser's equivalent).
-3. Log in as `ubuntu`.
-### Option B — DCV Viewer app
- 
-Download from [amazondcv.com](https://www.amazondcv.com/).
- 
-1. Open the app.
-2. Enter `<public_ip>:8443` (include the port).
-3. Accept the same self-signed certificate trust prompt on first
-   connect — the app remembers it after that.
-4. Log in as `ubuntu`.
-Both work without extra config because of two settings already in
-`dcv.conf`:
-- `create-session = true` — lets DCV auto-create a session on
-  connect, instead of requiring one to be pre-created via CLI first.
-- `owner = "ubuntu"` — ties that auto-created session to the `ubuntu`
-  user.
 
----
- 
 ## Spot instances (optional, cheaper)
  
 `g4dn.xlarge` spot pricing is typically **50-70% cheaper** than
@@ -278,18 +217,9 @@ To keep this predictable, this config uses:
   box).
 - **Full re-provisioning on next `apply`.** Since termination deletes
   the EBS root volume, a fresh instance means Phase 1 → reboot →
-  Phase 2 runs again from scratch (~20 min), and a new GitHub deploy
+  Phase 2 runs again from scratch (~10-15 min), and a new GitHub deploy
   key gets generated (re-add it to the repo's deploy keys).
 **Spot request lifecycle / does Terraform cancel it?**
-Yes — with `spot_instance_type = "one-time"`, AWS itself automatically
-closes the spot request the moment the instance is fulfilled and later
-terminated (whether terminated by an interruption, or by you running
-`terraform destroy`). There's no separate spot request object for
-Terraform to track or clean up — `instance_market_options` is just a
-launch-time attribute of the `aws_instance` resource, not a distinct
-resource type. `terraform destroy` terminates the instance exactly
-like it would an on-demand one, and the one-time spot request closes
-itself as a side effect. Nothing lingers, nothing to check manually.
  
 What you *do* lose on interruption: your active DCV session, unsaved
 in-memory work, and the provisioned environment itself (since it's not
@@ -326,9 +256,9 @@ recreate the instance under the new pricing model since
       IP (`x.x.x.x/32`) if this will be up for more than a quick test.
 - [ ] Confirm the AMI (`ami_id`) still exists in your target region —
       AMI IDs can be deprecated/replaced over time.
-- [ ] `g4dn.xlarge` is a paid GPU instance — remember to
+- [ ] `g4dn.xlarge`/`g5.xlarge`/`g6.xlarge` are paid GPU instances — remember to
       `terraform destroy` (or at least stop the instance) when not in
-      use. Provisioning alone takes ~15–25 minutes before ROS2 is fully
+      use. Provisioning alone takes ~10–15 minutes before ROS2 is fully
       installed.
 
 ---
