@@ -238,7 +238,7 @@ then `terraform plan && terraform apply`.
 changed on a running instance, so toggling this always shows as
 `-/+ aws_instance.ros2_robotics (destroy and then create)` in the
 plan, never an in-place update. Practically this means switching
-either direction = full re-provisioning (~20 min), a new public IP,
+either direction = full re-provisioning (~10 min), a new public IP,
 and a new GitHub deploy key to re-add — same cost as a manual
 `destroy` + `apply`. The security group is untouched either way.
  
