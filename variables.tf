@@ -34,16 +34,28 @@ variable "root_volume_type" {
   default     = "gp3"
 }
 
-variable "use_spot_instance" {
-  description = "Launch as a spot instance instead of on-demand"
+variable "use_spot_fleet" {
+  description = "Launch via a Spot Fleet request instead of an on-demand instance."
   type        = bool
   default     = false
 }
 
-variable "spot_max_price" {
-  description = "Max hourly price willing to pay for spot (USD). Leave null to default to the current on-demand price as the cap."
+variable "spot_fleet_instance_types" {
+  description = "Acceptable instance types for the Spot Fleet request, in preference order."
+  type        = list(string)
+  default     = ["g4dn.xlarge", "g5.xlarge", "g6.xlarge"]
+}
+
+variable "spot_fleet_target_capacity" {
+  description = "Target capacity (number of instances) for the Spot Fleet request."
+  type        = number
+  default     = 1
+}
+
+variable "spot_fleet_allocation_strategy" {
+  description = "Spot Fleet allocation strategy."
   type        = string
-  default     = null
+  default     = "priceCapacityOptimized"
 }
 
 variable "allowed_cidr" {

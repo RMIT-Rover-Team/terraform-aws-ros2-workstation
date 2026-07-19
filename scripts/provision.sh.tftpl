@@ -50,20 +50,6 @@ case "$PHASE" in
 2)
   echo "=== Running phase 2 ==="
 
-  sed -i s/"#create-session = true"/"create-session = true"/g /etc/dcv/dcv.conf
-  sed -i s/'#owner = ""'/'owner = "ubuntu"'/g /etc/dcv/dcv.conf
-
-  cat <<'DCVCONF' >> /etc/dcv/dcv.conf
-
-[clipboard]
-primary-selection-paste=true
-primary-selection-copy=true
-DCVCONF
-
-  systemctl enable dcvserver
-  systemctl start dcvserver
-  echo 'ubuntu:ubuntu' | chpasswd
-
   apt update -y && apt install -y locales
   locale-gen en_US en_US.UTF-8
   update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
@@ -135,16 +121,43 @@ DCVCONF
   echo "(Also saved to /home/ubuntu/github_deploy_key.pub for easy viewing)"
   echo "===================================================================="
 
+  echo "=== Phase 2 complete. Starting phase 3 (DCV) immediately, no reboot needed. ==="
+
+  # No reboot needed between phase 2 and 3 — advance the marker and
+  # re-exec this script so it re-reads the phase and runs phase 3 now,
+  # in the same boot, rather than waiting for the next one.
+  echo 3 > "$PHASE_FILE"
+  exec "$0"
+  ;;
+
+3)
+  echo "=== Running phase 3 (DCV startup — last step, signals full readiness) ==="
+
+  sed -i s/"#create-session = true"/"create-session = true"/g /etc/dcv/dcv.conf
+  sed -i s/'#owner = ""'/'owner = "ubuntu"'/g /etc/dcv/dcv.conf
+
+  cat <<'DCVCONF' >> /etc/dcv/dcv.conf
+
+[clipboard]
+primary-selection-paste=true
+primary-selection-copy=true
+DCVCONF
+
+  echo 'ubuntu:YourNewPassword123!' | chpasswd
+  systemctl enable dcvserver
+  systemctl start dcvserver
+
   echo done > "$PHASE_FILE"
 
   # Stop this service from ever running again on future boots/restarts
   systemctl disable provision.service
 
-  echo "=== Phase 2 complete. Provisioning finished. ==="
+  echo "=== Phase 3 complete. DCV is now up — provisioning fully finished. ==="
   ;;
 
 done)
   echo "=== Provisioning already complete, nothing to do ==="
+  systemctl disable provision.service 2>/dev/null || true
   ;;
 
 esac
