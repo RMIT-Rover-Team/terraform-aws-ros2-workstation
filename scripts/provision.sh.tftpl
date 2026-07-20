@@ -143,7 +143,7 @@ primary-selection-paste=true
 primary-selection-copy=true
 DCVCONF
 
-  echo 'ubuntu:YourNewPassword123!' | chpasswd
+  echo 'ubuntu:YourNewPassword123!' | sudo chpasswd
   systemctl enable dcvserver
   systemctl start dcvserver
 
